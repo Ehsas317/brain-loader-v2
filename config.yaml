@@ -1,0 +1,68 @@
+# Brain Loader v2 Configuration
+# M1 Max 32GB — 4GB permanent coordinator + 20GB hot-swap slot
+
+project:
+  name: "brain_loader_v2"
+  memory_file: "./memory.md"
+  state_file: "./state.json"
+  outputs_dir: "./outputs"
+  logs_dir: "./logs"
+
+telegram:
+  token: "YOUR_BOT_TOKEN_HERE"  # From @BotFather
+  chat_id: "YOUR_CHAT_ID_HERE"   # From @userinfobot
+  notify_on_start: true
+  notify_on_task_complete: true
+  notify_on_final: true
+
+coordinator:
+  model_path: "mlx-community/Qwen2.5-1.5B-Instruct-4bit"
+  max_tokens: 4096
+  temperature: 0.3
+  description: "Permanent coordinator — routes tasks, manages memory"
+  ram_estimate_gb: 4
+
+brain:
+  model_path: "mlx-community/Qwen3-32B-4bit"
+  max_tokens_first_load: 16384
+  max_tokens_subsequent: 8192
+  max_tokens_final: 12288
+  temperature: 0.5
+  description: "Large planning model — plans tasks and adapts based on outputs"
+  ram_estimate_gb: 20
+
+specialists:
+  coder:
+    model_path: "mlx-community/Qwen2.5-Coder-32B-Instruct-4bit"
+    max_tokens: 8192
+    temperature: 0.2
+    description: "Code generation, debugging, implementation"
+    ram_estimate_gb: 20
+  researcher:
+    model_path: "mlx-community/Qwen3-32B-4bit"
+    max_tokens: 8192
+    temperature: 0.3
+    description: "Research, analysis, data gathering"
+    ram_estimate_gb: 20
+  writer:
+    model_path: "mlx-community/Qwen3-32B-4bit"
+    max_tokens: 8192
+    temperature: 0.4
+    description: "Documentation, copy, synthesis"
+    ram_estimate_gb: 20
+  critic:
+    model_path: "mlx-community/Qwen3-32B-4bit"
+    max_tokens: 4096
+    temperature: 0.2
+    description: "Review, critique, quality assurance"
+    ram_estimate_gb: 20
+  math:
+    model_path: "mlx-community/Qwen3-32B-4bit"
+    max_tokens: 4096
+    temperature: 0.2
+    description: "Mathematical reasoning, algorithms"
+    ram_estimate_gb: 20
+
+memory:
+  gc_sleep_seconds: 2
+  aggressive_cleanup: true
