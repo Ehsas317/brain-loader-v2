@@ -117,10 +117,10 @@ Delete current subtask block. Append one summary line to completed task. Write n
 
             if in_task_list:
                 # Update completed task
-                match = re.match(r'^(\s*- \[)(.)(\] Task ' + str(task_num) + r': .+?)(?: — .+)?(\s*← CURRENT)?$', line)
-                if match:
+                done_match = re.match(r'^(\s*- \[)(.)\] Task ' + str(task_num) + r': (.+?)(?: — .+)?(\s*← CURRENT)?$', line)
+                if done_match:
                     # Mark done, append summary, remove CURRENT marker
-                    new_line = f"{match.group(1)}x{match.group(3)} — {summary}"
+                    new_line = f"{done_match.group(1)}x] Task {task_num}: {done_match.group(3)} — {summary}"
                     new_lines.append(new_line)
                     continue
 
