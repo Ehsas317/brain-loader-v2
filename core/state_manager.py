@@ -1,162 +1,108 @@
+#!/usr/bin/env python3
+#
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  RELAY  — FILE: core/state_manager.py                                    ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# PROJECT:    Relay (formerly Brain Loader v2)
+# REPO:       https://github.com/Ehsas317/relay
+# WHAT:       The coordinator stays resident and relays the baton between
+#             hot-swapped models. The core metaphor is handoffs, not planning.
+#
+# THIS FILE:
+#   State Manager — handles persistent JSON state with resume support.
+#   Saves state after every task for robust recovery.
+#
+# HOW TO USE RELAY:
+#   1. Install:    pip install -r requirements.txt
+#   2. Configure:  Edit config.yaml with your API tokens
+#   3. Run:        python main.py "Your project description"
+#
+# ═══════════════════════════════════════════════════════════════════════════
+#
+
 """
-State Manager
-Tracks coordinator state in state.json.
-Updated after every state change. Enables crash recovery.
+Relay — State Manager
+
+Persistent JSON state management with full resume support.
 """
 
 import json
 import logging
 from pathlib import Path
-from datetime import datetime
-from typing import List, Dict, Optional
-from dataclasses import dataclass, asdict
+from typing import Dict, Any, Optional
+from dataclasses import dataclass, field, asdict
 
-logger = logging.getLogger(__name__)
-
-
-@dataclass
-class TaskState:
-    id: int
-    name: str
-    status: str  # pending, active, done
-    specialist: Optional[str] = None
-    output_file: Optional[str] = None
+logger = logging.getLogger("relay.state")
 
 
 @dataclass
-class ProjectState:
-    project_name: str
-    goal: str
+class AppState:
+    """Application state for Relay."""
+    app_idea: str = ""
+    current_phase: str = "planning"
     current_task_index: int = 0
-    total_tasks: int = 0
-    status: str = "initialized"  # initialized, planning, executing, complete
-    loaded_model: Optional[str] = None  # coordinator, brain, specialist_name
-    last_checkpoint: str = ""
-    tasks: List[Dict] = None
-
-    def __post_init__(self):
-        if self.tasks is None:
-            self.tasks = []
-        if not self.last_checkpoint:
-            self.last_checkpoint = datetime.now().isoformat()
+    tasks: list = field(default_factory=list)
+    completed_tasks: list = field(default_factory=list)
+    outputs: Dict[str, Any] = field(default_factory=dict)
+    reviews: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class StateManager:
-    """Manages state.json for crash recovery and tracking."""
+    """
+    Relay State Manager
 
-    def __init__(self, state_file: str = "./state.json"):
+    Manages persistent application state in JSON format.
+    State is saved after every task, enabling robust resume functionality.
+
+    Usage:
+        state_mgr = StateManager()
+        state_mgr.state.app_idea = "Build a fitness app"
+        state_mgr.save()
+        # Later...
+        state_mgr.load()
+    """
+
+    def __init__(self, state_file: str = "memory/state.json"):
         self.state_file = Path(state_file)
-        self.state: Optional[ProjectState] = None
+        self.state = AppState()
+        self._load_state()
 
-    def initialize(self, project_name: str, goal: str, task_names: List[str]) -> ProjectState:
-        """Create initial state."""
-        tasks = [
-            {"id": i+1, "name": name, "status": "pending", 
-             "specialist": None, "output_file": None}
-            for i, name in enumerate(task_names)
-        ]
+    def _load_state(self):
+        """Load state from disk or create default."""
+        if self.state_file.exists():
+            try:
+                with open(self.state_file, 'r') as f:
+                    data = json.load(f)
+                raw = f.read()
+                if not raw.strip():
+                    self.logger.warning("State file empty — using defaults")
+                    self.state = AppState()
+                    self._save_state()
+                    return
+                self.state = AppState(**data)
+                logger.info("[StateManager] Loaded state: %d tasks", len(self.state.tasks))
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning("[StateManager] Corrupt state file, starting fresh: %s", e)
+                self.state = AppState()
+        else:
+            logger.info("[StateManager] No state file found, starting fresh")
+            self.state = AppState()
 
-        self.state = ProjectState(
-            project_name=project_name,
-            goal=goal,
-            current_task_index=1,
-            total_tasks=len(task_names),
-            status="planning",
-            loaded_model="coordinator",
-            tasks=tasks
-        )
-        self._save()
-        logger.info("[StateManager] Initialized with %d tasks", len(tasks))
-        return self.state
-
-    def mark_task_active(self, task_id: int, specialist: str) -> None:
-        """Mark task as currently being worked on."""
-        for task in self.state.tasks:
-            if task["id"] == task_id:
-                task["status"] = "active"
-                task["specialist"] = specialist
-                break
-        self.state.current_task_index = task_id
-        self.state.loaded_model = specialist
-        self.state.last_checkpoint = datetime.now().isoformat()
-        self._save()
-
-    def mark_task_done(self, task_id: int, output_file: str) -> None:
-        """Mark task as completed."""
-        for task in self.state.tasks:
-            if task["id"] == task_id:
-                task["status"] = "done"
-                task["output_file"] = output_file
-                break
-        self.state.loaded_model = "coordinator"
-        self.state.last_checkpoint = datetime.now().isoformat()
-        self._save()
-
-    def update_status(self, status: str) -> None:
-        """Update overall project status."""
-        self.state.status = status
-        self.state.last_checkpoint = datetime.now().isoformat()
-        self._save()
-
-    def set_loaded_model(self, model_name: str) -> None:
-        """Track which model is currently loaded."""
-        self.state.loaded_model = model_name
-        self.state.last_checkpoint = datetime.now().isoformat()
-        self._save()
-
-    def load_existing(self) -> bool:
-        """Try to load existing state. Returns True if found."""
-        if not self.state_file.exists():
-            return False
-
-        try:
-            with open(self.state_file, "r") as f:
-                data = json.load(f)
-            self.state = ProjectState(**data)
-            logger.info("[StateManager] Loaded existing state. Task %d/%d",
-                       self.state.current_task_index, self.state.total_tasks)
-            return True
-        except Exception as e:
-            logger.error("[StateManager] Failed to load state: %s", e)
-            return False
-
-    def get_next_pending_task(self) -> Optional[Dict]:
-        """Get next task that needs execution."""
-        for task in self.state.tasks:
-            if task["status"] == "pending":
-                return task
-        return None
-
-    def get_task_output(self, task_id: int) -> Optional[str]:
-        """Get output file path for a task."""
-        for task in self.state.tasks:
-            if task["id"] == task_id and task.get("output_file"):
-                return task["output_file"]
-        return None
-
-    def all_tasks_done(self) -> bool:
-        """Check if all tasks are completed."""
-        return all(t["status"] == "done" for t in self.state.tasks)
-
-    def _save(self) -> None:
-        """Save state to JSON."""
-        with open(self.state_file, "w") as f:
+    def save(self):
+        """Save current state to disk."""
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.state_file, 'w') as f:
             json.dump(asdict(self.state), f, indent=2)
+        logger.debug("[StateManager] State saved")
 
-    def get_summary(self) -> str:
-        """Human-readable summary."""
-        if not self.state:
-            return "No state."
+    def is_resumable(self) -> bool:
+        """Check if there's a project to resume."""
+        return bool(self.state.app_idea and self.state.current_phase != "done")
 
-        done = sum(1 for t in self.state.tasks if t["status"] == "done")
-        total = len(self.state.tasks)
-
-        lines = [
-            f"Project: {self.state.project_name}",
-            f"Status: {self.state.status}",
-            f"Progress: {done}/{total} tasks",
-            f"Current: Task {self.state.current_task_index}",
-            f"Loaded: {self.state.loaded_model}",
-            f"Checkpoint: {self.state.last_checkpoint}"
-        ]
-        return "\n".join(lines)
+    def reset(self):
+        """Reset state for a new project."""
+        self.state = AppState()
+        self.save()
+        logger.info("[StateManager] State reset")

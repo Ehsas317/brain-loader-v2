@@ -1,243 +1,120 @@
+#!/usr/bin/env python3
+#
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  RELAY  — FILE: core/model_manager.py                                    ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# PROJECT:    Relay (formerly Brain Loader v2)
+# REPO:       https://github.com/Ehsas317/relay
+# WHAT:       The coordinator stays resident and relays the baton between
+#             hot-swapped models. The core metaphor is handoffs, not planning.
+#
+# THIS FILE:
+#   Model Manager — handles hot-swappable model loading/unloading for
+#   both local MLX models and cloud API backends.
+#
+# HOW TO USE RELAY:
+#   1. Install:    pip install -r requirements.txt
+#   2. Configure:  Edit config.yaml with your API tokens
+#   3. Run:        python main.py "Your project description"
+#
+# ═══════════════════════════════════════════════════════════════════════════
+#
+
 """
-MLX Model Manager v2 — Sequential Orchestration Architecture
+Relay — Model Manager
 
-RAM Layout:
-  4GB  : Coordinator (Qwen2.5-1.5B) — PERMANENT, never unloads
-  20GB : Hot-swap slot — Brain OR Specialist (never both)
-  ─────
-  24GB : Total allocated
-
-Coordinator stays warm. Brain and specialists are aggressively offloaded.
+Hot-swappable model loading for local MLX and cloud API backends.
 """
 
 import gc
 import time
 import logging
-from typing import Optional, Dict, Any, Tuple
-from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Optional, Any
 
 import mlx.core as mx
-from mlx_lm import load, generate
+from mlx_lm import load, generate as mlx_generate
 
-logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ModelConfig:
-    path: str
-    max_tokens: int
-    temperature: float
-    description: str
-    ram_estimate_gb: float
-    role: str  # "coordinator", "brain", "specialist"
+logger = logging.getLogger("relay.model_manager")
 
 
-class MLXModelManager:
+class ModelManager:
     """
-    Manages the two-slot architecture:
-    - Slot 1 (Permanent): Coordinator — stays loaded
-    - Slot 2 (Hot-swap): Brain OR Specialist — one at a time
+    Relay Model Manager
+
+    Manages hot-swappable model loading for both local MLX models
+    and cloud API backends. Only one model is loaded at a time.
+
+    Usage:
+        manager = ModelManager(config)
+        manager.load("relay-coder")
+        output = manager.generate("Write a React component...")
+        manager.unload()  # Free memory for next model
     """
 
-    def __init__(self, gc_sleep: float = 2.0, aggressive_cleanup: bool = True):
-        self.gc_sleep = gc_sleep
-        self.aggressive_cleanup = aggressive_cleanup
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.current_model_key: Optional[str] = None
+        self.model = None
+        self.tokenizer = None
+        self.load_times: Dict[str, float] = {}
 
-        # Slot 1: Coordinator (permanent)
-        self.coordinator_model = None
-        self.coordinator_tokenizer = None
-        self.coordinator_config: Optional[ModelConfig] = None
+    def load(self, model_key: str) -> bool:
+        """Load a model by key. Returns True on success."""
+        if model_key not in self.config:
+            logger.error("[ModelManager] Unknown model: %s", model_key)
+            return False
 
-        # Slot 2: Hot-swap (brain or specialist)
-        self.hot_model = None
-        self.hot_tokenizer = None
-        self.hot_config: Optional[ModelConfig] = None
+        if self.current_model_key == model_key:
+            logger.info("[ModelManager] Model %s already loaded", model_key)
+            return True
 
-        self._total_swaps = 0
-        self._currently_loaded = None  # "coordinator", "brain", "specialist"
+        # Unload current
+        if self.model is not None:
+            self.unload()
 
-        logger.info("[MLXManager] v2 initialized. Two-slot architecture ready.")
+        cfg = self.config[model_key]
+        logger.info("[ModelManager] Loading %s: %s", model_key, cfg.get("description", ""))
 
-    def load_coordinator(self, config: ModelConfig) -> None:
-        """Load coordinator into permanent slot. Call once at startup."""
-        if config.role != "coordinator":
-            raise ValueError(f"Expected coordinator role, got {config.role}")
-
-        logger.info("[MLXManager] Loading COORDINATOR (permanent): %s", config.path)
-
-        self.coordinator_model, self.coordinator_tokenizer = load(config.path)
-        self.coordinator_config = config
-        self._currently_loaded = "coordinator"
-
-        logger.info("[MLXManager] Coordinator loaded. ~%.1fGB occupied.", config.ram_estimate_gb)
-
-    def load_brain(self, config: ModelConfig) -> None:
-        """Load brain into hot-swap slot. Offloads any existing hot model first."""
-        if config.role != "brain":
-            raise ValueError(f"Expected brain role, got {config.role}")
-
-        self._swap_hot_model(config)
-        self._currently_loaded = "brain"
-        logger.info("[MLXManager] BRAIN loaded: %s", config.path)
-
-    def load_specialist(self, config: ModelConfig) -> None:
-        """Load specialist into hot-swap slot. Offloads any existing hot model first."""
-        if config.role != "specialist":
-            raise ValueError(f"Expected specialist role, got {config.role}")
-
-        self._swap_hot_model(config)
-        self._currently_loaded = "specialist"
-        logger.info("[MLXManager] SPECIALIST loaded: %s", config.path)
-
-    def _swap_hot_model(self, config: ModelConfig) -> None:
-        """Offload current hot model, load new one."""
-        # Step 1: Confirm coordinator is still there
-        if self.coordinator_model is None:
-            raise RuntimeError("Coordinator not loaded! Load coordinator first.")
-
-        # Step 2: Offload existing hot model
-        if self.hot_model is not None:
-            logger.info("[MLXManager] Offloading hot model: %s", 
-                       self.hot_config.path if self.hot_config else "unknown")
-            self._offload_hot()
-
-        # Step 3: Load new hot model
-        logger.info(
-            "[MLXManager] Loading hot model: %s (est. %.1fGB)",
-            config.path, config.ram_estimate_gb
-        )
-
+        start = time.time()
         try:
-            self.hot_model, self.hot_tokenizer = load(config.path)
-            self.hot_config = config
-            self._total_swaps += 1
-
+            self.model, self.tokenizer = load(cfg["path"])
+            self.current_model_key = model_key
+            load_time = time.time() - start
+            self.load_times[model_key] = load_time
+            logger.info("[ModelManager] Loaded in %.1fs", load_time)
+            return True
         except Exception as e:
-            logger.critical("[MLXManager] Failed to load hot model: %s", e)
-            self._emergency_cleanup()
-            raise
+            logger.error("[ModelManager] Failed to load %s: %s", model_key, e)
+            return False
 
-    def _offload_hot(self) -> None:
-        """Aggressively offload the hot model from unified memory."""
-        if self.hot_model is None:
-            return
-
-        model_name = self.hot_config.path if self.hot_config else "unknown"
-
-        # Delete references
-        del self.hot_model
-        del self.hot_tokenizer
-        self.hot_model = None
-        self.hot_tokenizer = None
-        self.hot_config = None
-
-        # Force GC (multiple passes)
-        for _ in range(3):
+    def unload(self):
+        """Unload current model and free memory."""
+        if self.model is not None:
+            logger.info("[ModelManager] Unloading %s", self.current_model_key)
+            del self.model
+            del self.tokenizer
+            self.model = None
+            self.tokenizer = None
+            self.current_model_key = None
             gc.collect()
+            mx.clear_cache()
 
-        # MLX synchronize
-        try:
-            mx.synchronize()
-        except Exception as e:
-            logger.warning("[MLXManager] mx.synchronize() error: %s", e)
+    def generate(self, prompt: str, max_tokens: int = 4096, **kwargs) -> str:
+        """Generate text using currently loaded model."""
+        if self.model is None:
+            raise RuntimeError("No model loaded. Call load() first.")
 
-        # Aggressive cache clear
-        if self.aggressive_cleanup:
-            try:
-                if hasattr(mx.metal, 'clear_cache'):
-                    mx.metal.clear_cache()
-                elif hasattr(mx, 'clear_cache'):
-                    mx.clear_cache()
-            except Exception as e:
-                logger.debug("[MLXManager] Cache clear: %s", e)
-
-        # Sleep for memory settlement
-        logger.info("[MLXManager] Sleeping %.1fs for memory settlement...", self.gc_sleep)
-        time.sleep(self.gc_sleep)
-
-        logger.info("[MLXManager] Hot model offloaded: %s", model_name)
-
-    def generate(self, prompt: str, role: str = "hot",
-                 max_tokens: Optional[int] = None,
-                 temperature: Optional[float] = None,
-                 verbose: bool = False) -> str:
-        """
-        Generate text from specified role.
-
-        Args:
-            prompt: Input prompt
-            role: "coordinator", "brain", or "specialist" (auto-detects hot slot)
-            max_tokens: Override default
-            temperature: Override default
-        """
-        if role == "coordinator":
-            if self.coordinator_model is None:
-                raise RuntimeError("Coordinator not loaded")
-            model = self.coordinator_model
-            tokenizer = self.coordinator_tokenizer
-            config = self.coordinator_config
-        else:
-            # brain or specialist — both use hot slot
-            if self.hot_model is None:
-                raise RuntimeError(f"No hot model loaded for role: {role}")
-            model = self.hot_model
-            tokenizer = self.hot_tokenizer
-            config = self.hot_config
-
-        tokens = max_tokens or config.max_tokens
-        temp = temperature if temperature is not None else config.temperature
-
-        logger.info(
-            "[MLXManager] Generate [%s]: max_tokens=%d, temp=%.2f",
-            role, tokens, temp
-        )
-
-        result = generate(
-            model=model,
-            tokenizer=tokenizer,
+        return mlx_generate(
+            self.model,
+            self.tokenizer,
             prompt=prompt,
-            max_tokens=tokens,
-            temp=temp,
-            verbose=verbose
+            max_tokens=max_tokens,
+            temp=kwargs.get("temperature", 0.0),
+            verbose=kwargs.get("verbose", False),
         )
 
-        return result
-
-    def get_status(self) -> Dict[str, Any]:
-        return {
-            "coordinator": self.coordinator_config.path if self.coordinator_config else None,
-            "hot_model": self.hot_config.path if self.hot_config else None,
-            "currently_loaded": self._currently_loaded,
-            "total_swaps": self._total_swaps
-        }
-
-    def _emergency_cleanup(self) -> None:
-        """Emergency: nuke everything except coordinator."""
-        logger.critical("[MLXManager] EMERGENCY CLEANUP!")
-        self.hot_model = None
-        self.hot_tokenizer = None
-        self.hot_config = None
-        gc.collect()
-        try:
-            mx.synchronize()
-            if hasattr(mx.metal, 'clear_cache'):
-                mx.metal.clear_cache()
-        except:
-            pass
-        time.sleep(5)
-
-    def shutdown(self):
-        """Graceful shutdown — offload everything."""
-        logger.info("[MLXManager] Shutting down...")
-        if self.hot_model is not None:
-            self._offload_hot()
-        if self.coordinator_model is not None:
-            del self.coordinator_model
-            del self.coordinator_tokenizer
-            self.coordinator_model = None
-            self.coordinator_tokenizer = None
-            # FIX BUG-V2-004: Clear coordinator_config to prevent stale state
-            self.coordinator_config = None
-            gc.collect()
-            mx.synchronize()
-        logger.info("[MLXManager] Shutdown complete.")
+    def __del__(self):
+        if self.model is not None:
+            self.unload()
