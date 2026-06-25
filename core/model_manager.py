@@ -236,6 +236,8 @@ class MLXModelManager:
             del self.coordinator_tokenizer
             self.coordinator_model = None
             self.coordinator_tokenizer = None
+            # FIX BUG-V2-004: Clear coordinator_config to prevent stale state
+            self.coordinator_config = None
             gc.collect()
             mx.synchronize()
         logger.info("[MLXManager] Shutdown complete.")
