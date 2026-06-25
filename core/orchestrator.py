@@ -64,6 +64,11 @@ class BrainOrchestrator:
         # Telegram
         self._telegram = None
 
+        # FIX BUG-V2-003: Load coordinator immediately in __init__
+        # so it's always available before any brain/specialist operations
+        logger.info("[Orchestrator] Loading coordinator into permanent slot...")
+        self.model_mgr.load_coordinator(self.coordinator_config)
+
         logger.info("[Orchestrator] v2 initialized. Coordinator: %s", 
                    self.coordinator_config.path)
 
@@ -82,9 +87,8 @@ class BrainOrchestrator:
         """Start fresh project."""
         logger.info("[Orchestrator] Starting new project: %s", goal)
 
-        # STEP 1: Load coordinator (PERMANENT)
-        logger.info("[Orchestrator] Loading coordinator into permanent slot...")
-        self.model_mgr.load_coordinator(self.coordinator_config)
+        # STEP 1: Coordinator is already loaded (permanent) from __init__
+        # FIX BUG-V2-003: Coordinator loaded in __init__, not here
         self.state_mgr.set_loaded_model("coordinator")
 
         # STEP 2: First Brain load — create full task list + Task 1 subtasks
@@ -336,6 +340,7 @@ Deliver the complete result to the user. Be thorough.
         First brain load: create full task list and Task 1 subtasks.
         Returns: (task_names, first_specialist, first_subtasks)
         """
+        # FIX BUG-V2-003: Coordinator is already loaded from __init__
         self.model_mgr.load_brain(self.brain_config)
         self.state_mgr.set_loaded_model("brain")
 
@@ -537,9 +542,7 @@ Output a brief synthesis of the entire project.
 
     def _resume_execution(self) -> None:
         """Resume from saved state."""
-        # Load coordinator first
-        self.model_mgr.load_coordinator(self.coordinator_config)
-
+        # Coordinator already loaded from __init__
         # Verify memory integrity
         if not self.memory_mgr.verify_integrity():
             raise RuntimeError("Cannot resume — memory.md is corrupted or missing")
