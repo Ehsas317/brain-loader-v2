@@ -1,103 +1,109 @@
+#!/usr/bin/env python3
+#
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  RELAY  — FILE: utils/telegram_notify.py                                 ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# PROJECT:    Relay (formerly Brain Loader v2)
+# REPO:       https://github.com/Ehsas317/relay
+# WHAT:       The coordinator stays resident and relays the baton between
+#             hot-swapped models. The core metaphor is handoffs, not planning.
+#
+# THIS FILE:
+#   Telegram Notifier — sends real-time build progress updates via Telegram.
+#
+# HOW TO USE RELAY:
+#   1. Install:    pip install -r requirements.txt
+#   2. Configure:  Edit config.yaml with your API tokens
+#   3. Run:        python main.py "Your project description"
+#
+# ═══════════════════════════════════════════════════════════════════════════
+#
+
 """
-Telegram Notification Utility
-Sends updates to your phone about project progress.
+Relay — Telegram Notifier
+
+Sends real-time build progress updates via Telegram.
 """
 
-import asyncio
 import logging
 from typing import Optional
+import httpx
 
-try:
-    from telegram import Bot
-    TELEGRAM_AVAILABLE = True
-except ImportError:
-    TELEGRAM_AVAILABLE = False
-    Bot = None
-
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("relay.telegram")
 
 
 class TelegramNotifier:
     """
-    Simple Telegram bot wrapper for project notifications.
+    Relay Telegram Notifier
 
-    Setup:
-    1. Message @BotFather on Telegram, create a bot, get token
-    2. Message @userinfobot to get your chat ID
-    3. Put both in config.yaml
+    Sends build progress updates to a Telegram chat.
+    Requires a bot token (from @BotFather) and chat ID.
+
+    Usage:
+        notifier = TelegramNotifier(bot_token="...", chat_id="...")
+        notifier.send("🏃 Relay starting...")
     """
 
-    def __init__(self, token: str, chat_id: str):
-        if not TELEGRAM_AVAILABLE:
-            raise ImportError(
-                "python-telegram-bot not installed. "
-                "Run: pip install python-telegram-bot"
-            )
+    def __init__(self, bot_token: str, chat_id: str):
+        self.bot_token = bot_token
+        self.chat_id = chat_id
+        self.base_url = f"https://api.telegram.org/bot{bot_token}"
+        self._enabled = bool(bot_token and chat_id)
 
-        self.token = token
-        self.chat_id = str(chat_id)
-        self.bot = Bot(token=token)
+        if not self._enabled:
+            logger.warning("Telegram notifier disabled — missing token or chat ID")
 
-        logger.info("[Telegram] Notifier initialized for chat %s", chat_id)
-
-    def send(self, message: str) -> bool:
-        """
-        Send a message. Handles asyncio internally.
-
-        Args:
-            message: Markdown-formatted message (max 4096 chars)
-
-        Returns:
-            True if sent successfully
-        """
-        # Truncate if too long for Telegram
-        if len(message) > 4000:
-            message = message[:3997] + "..."
+    def send(self, message: str, parse_mode: str = "Markdown") -> bool:
+        """Send a message to the configured Telegram chat."""
+        if not self._enabled:
+            return False
 
         try:
-            # Create new event loop if needed (for thread safety)
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_closed():
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+            url = f"{self.base_url}/sendMessage"
+            payload = {
+                "chat_id": self.chat_id,
+                "text": message,
+                "parse_mode": parse_mode,
+            }
 
-            loop.run_until_complete(
-                self.bot.send_message(
-                    chat_id=self.chat_id,
-                    text=message,
-                    parse_mode="Markdown",
-                    disable_web_page_preview=True
-                )
-            )
+            response = httpx.post(url, json=payload, timeout=10.0)
+            response.raise_for_status()
 
-            logger.debug("[Telegram] Sent: %s...", message[:50])
+            logger.debug("Telegram message sent: %s", message[:50])
             return True
 
+        except httpx.HTTPStatusError as e:
+            logger.error("Telegram API error: %s", e.response.text)
+            return False
         except Exception as e:
-            logger.error("[Telegram] Failed to send message: %s", e)
+            logger.error("Failed to send Telegram message: %s", e)
             return False
 
     def send_file(self, file_path: str, caption: str = "") -> bool:
-        """Send a file (e.g., final summary)."""
+        """Send a file to Telegram."""
+        if not self._enabled:
+            return False
+
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+            url = f"{self.base_url}/sendDocument"
 
             with open(file_path, "rb") as f:
-                loop.run_until_complete(
-                    self.bot.send_document(
-                        chat_id=self.chat_id,
-                        document=f,
-                        caption=caption[:1024]
-                    )
-                )
+                files = {"document": f}
+                data = {
+                    "chat_id": self.chat_id,
+                    "caption": caption,
+                }
+                response = httpx.post(url, data=data, files=files, timeout=30.0)
+                response.raise_for_status()
+
+            logger.debug("Telegram file sent: %s", file_path)
             return True
+
         except Exception as e:
-            logger.error("[Telegram] Failed to send file: %s", e)
+            logger.error("Failed to send Telegram file: %s", e)
             return False
+
+    def __repr__(self):
+        status = "enabled" if self._enabled else "disabled"
+        return f"<TelegramNotifier {status}>"

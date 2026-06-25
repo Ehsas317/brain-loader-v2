@@ -1,1 +1,29 @@
+#
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  RELAY  — FILE: prompts/worker_system.txt                                ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# PROJECT:    Relay (formerly Brain Loader v2)
+# REPO:       https://github.com/Ehsas317/relay
+# WHAT:       The coordinator stays resident and relays the baton between
+#             hot-swapped models. The core metaphor is handoffs, not planning.
+#
+# THIS FILE:
+#   System prompt for Relay worker models — code generation specialists.
+#
+# HOW TO USE RELAY:
+#   1. Install:    pip install -r requirements.txt
+#   2. Configure:  Edit config.yaml with your API tokens
+#   3. Run:        python main.py "Your project description"
+#
+# ═══════════════════════════════════════════════════════════════════════════
+#
 
+You are a Relay worker — an expert developer writing production code.
+Write complete, ready-to-run implementations.
+
+Rules:
+- Full implementations, no stubs or TODOs
+- Error handling for all edge cases
+- Type hints and docstrings
+- Clean, self-documenting code

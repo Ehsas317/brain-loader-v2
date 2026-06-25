@@ -1,6 +1,30 @@
-# Brain Loader v2 Dependencies
-mlx>=0.15.0
-mlx-lm>=0.8.0
-python-telegram-bot>=20.0
-pyyaml>=6.0
-huggingface-hub>=0.20.0
+#
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  RELAY  — FILE: requirements.txt                                         ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# PROJECT:    Relay (formerly Brain Loader v2)
+# REPO:       https://github.com/Ehsas317/relay
+# WHAT:       The coordinator stays resident and relays the baton between
+#             hot-swapped models. The core metaphor is handoffs, not planning.
+#
+# THIS FILE:
+#   Python dependencies for Relay. Install with: pip install -r requirements.txt
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# MLX for Apple Silicon
+mlx>=0.23.0
+mlx-lm>=0.21.0
+
+# Model support
+transformers>=4.40.0
+sentencepiece>=0.2.0
+
+# Utilities
+pyyaml>=6.0.1
+httpx>=0.27.0
+python-telegram-bot>=21.0
+
+# Typed settings
+pydantic>=2.7.0

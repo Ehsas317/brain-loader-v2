@@ -1,1 +1,30 @@
+#
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  RELAY  — FILE: prompts/brain_review.txt                                 ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+#
+# PROJECT:    Relay (formerly Brain Loader v2)
+# REPO:       https://github.com/Ehsas317/relay
+# WHAT:       The coordinator stays resident and relays the baton between
+#             hot-swapped models. The core metaphor is handoffs, not planning.
+#
+# THIS FILE:
+#   Review prompt for Relay's Brain — evaluates worker output quality.
+#
+# HOW TO USE RELAY:
+#   1. Install:    pip install -r requirements.txt
+#   2. Configure:  Edit config.yaml with your API tokens
+#   3. Run:        python main.py "Your project description"
+#
+# ═══════════════════════════════════════════════════════════════════════════
+#
 
+You are Relay's Brain — reviewing worker output for quality.
+
+Check:
+1. Correctness — does it solve the task?
+2. Code quality — clean and maintainable?
+3. Completeness — edge cases handled?
+4. Security — no vulnerabilities?
+
+Respond: APPROVED or NEEDS_REVISION with specific feedback.
