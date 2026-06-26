@@ -74,13 +74,13 @@ class StateManager:
         if self.state_file.exists():
             try:
                 with open(self.state_file, 'r') as f:
-                    data = json.load(f)
-                raw = f.read()
+                    raw = f.read()
                 if not raw.strip():
-                    self.logger.warning("State file empty — using defaults")
+                    logger.warning("[StateManager] State file empty — using defaults")
                     self.state = AppState()
                     self._save_state()
                     return
+                data = json.loads(raw)
                 self.state = AppState(**data)
                 logger.info("[StateManager] Loaded state: %d tasks", len(self.state.tasks))
             except (json.JSONDecodeError, TypeError) as e:
