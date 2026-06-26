@@ -1,8 +1,8 @@
-# Brain Loader v2
+# Relay
 
 Relay is the second iteration of the AI Build Engine. Unlike Forge, Relay is designed for continuous operation — the coordinator stays resident and relays the baton between hot-swapped models. The core metaphor is handoffs, not planning. Need DeepSeek for one task? Load it. Need Mistral for the next? Swap it in. All while maintaining full context.
 
-## What's New in brain loader v2
+## What's New in Relay
 
 - **Resident Coordinator**: The orchestrator stays running, models come and go
 - **Hot-Swappable Models**: Load and unload models on demand without losing context
